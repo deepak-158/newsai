@@ -50,6 +50,18 @@ The backend breaks your question down, uses FAISS to find the most relevant cont
 ### 6. Hinglish Translation Mode
 A toggleable feature that alters the prompt instructions sent to the LLaMA parameters, forcing the AI to act as a conversational interpreter generating complex financial implications into easy-to-read "Hinglish".
 
+### 7. Multi-Article News Navigator 🧠
+Groups related articles via FAISS vector similarity and uses hybrid Gemini/LLaMA reasoning to generate a unified, broad-scope intelligence briefing. This enables users to see the larger narrative and overall market impact beyond a single isolated article.
+
+### 8. Story Arc Tracker 📈
+Analyzes chronological article data to track how a specific business story or trend evolves over time. It highlights key turning points, shifts in market sentiment, and provides clear future watch-points.
+
+### 9. Hybrid Model Cascade & Rate Limiting
+IntelliSphere dynamically cascades through Google Gemini models (Pro/Flash/Lite) for heavy reasoning tasks, gracefully falling back to local `llama3:8b` via Ollama if rate limits or network issues arise. Furthermore, critical endpoints are protected by an intelligent 5 requests/minute IP rate limiter to safely optimize cost allocation.
+
+### 10. In-App System Configuration
+Via a robust frontend Settings UI, users can securely configure the underlying global LLM keys without ever touching a code editor. Backend updates process synchronously with local `.env` rewriting and immediate zero-downtime hot reloading.
+
 ---
 
 ## ⚙️ How to Run Locally

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, MessageSquare, ChevronRight, Activity, Send, X, Search } from 'lucide-react';
+import { Loader2, MessageSquare, ChevronRight, Activity, Send, X, Search, Zap, Clock, AlertTriangle, Target, Eye, Settings, Sun, Moon } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface Article {
   title: string;
@@ -11,6 +12,18 @@ interface Article {
   publishedAt: string;
 }
 
+type MainTab = 'summary' | 'navigator' | 'storyarc';
+
+const API_BASE = "http://localhost:8000";
+
+const QUICK_ACTIONS = [
+  { label: "Explain simply", icon: "💡", prompt: "Explain this article in simple terms using an analogy." },
+  { label: "Risks breakdown", icon: "⚠️", prompt: "Break down all the risks from this article with probability assessment." },
+  { label: "Contrarian view", icon: "🔄", prompt: "Give me a contrarian perspective that challenges the mainstream narrative of this article." },
+  { label: "What happens next", icon: "🔮", prompt: "What are the most likely next developments from this story?" },
+  { label: "Impact on me", icon: "🎯", prompt: "How does this news specifically impact someone in my role?" },
+];
+
 export default function App() {
   const [role, setRole] = useState<string | null>(null);
   const [news, setNews] = useState<Article[]>([]);
@@ -18,12 +31,25 @@ export default function App() {
   const [country, setCountry] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeSearch, setActiveSearch] = useState<string>("");
-  
+
   const [activeStory, setActiveStory] = useState<Article | null>(null);
   const [summary, setSummary] = useState<any>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [useVernacular, setUseVernacular] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<MainTab>('summary');
   
+  const [navigatorBrief, setNavigatorBrief] = useState<any>(null);
+  const [navigatorArticles, setNavigatorArticles] = useState<string[]>([]);
+  const [loadingNavigator, setLoadingNavigator] = useState(false);
+
+  const [storyArc, setStoryArc] = useState<any>(null);
+  const [loadingStoryArc, setLoadingStoryArc] = useState(false);
+
+  // Model tracking
+  const [modelUsed, setModelUsed] = useState<string>('');
+  const [chatModel, setChatModel] = useState<string>('');
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<{role: 'user'|'ai', content: string}[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -31,16 +57,97 @@ export default function App() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [geminiKeyStatus, setGeminiKeyStatus] = useState<{is_set: boolean, masked_key: string}>({is_set: false, masked_key: ""});
+  const [savingKey, setSavingKey] = useState(false);
+
+  // Groq key
+  const [groqKeyInput, setGroqKeyInput] = useState("");
+  const [groqKeyStatus, setGroqKeyStatus] = useState<{is_set: boolean, masked_key: string}>({is_set: false, masked_key: ""});
+  const [savingGroqKey, setSavingGroqKey] = useState(false);
+
+  // OpenRouter key
+  const [openrouterKeyInput, setOpenrouterKeyInput] = useState("");
+  const [openrouterKeyStatus, setOpenrouterKeyStatus] = useState<{is_set: boolean, masked_key: string}>({is_set: false, masked_key: ""});
+  const [savingOpenrouterKey, setSavingOpenrouterKey] = useState(false);
+
+  // Theme state
+  const [isDark, setIsDark] = useState(true);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('et-theme');
+    if (saved === 'light') {
+      setIsDark(false);
+      document.documentElement.classList.remove('dark');
+    } else {
+      setIsDark(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const newDark = !isDark;
+    setIsDark(newDark);
+    if (newDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('et-theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('et-theme', 'light');
+    }
+  };
+
+  const fetchGeminiKeyStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/gemini-key`);
+      const data = await res.json();
+      setGeminiKeyStatus(data);
+    } catch (e) {
+      console.error("Failed to fetch API key status", e);
+    }
+  };
+
+  const fetchGroqKeyStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/groq-key`);
+      const data = await res.json();
+      setGroqKeyStatus(data);
+    } catch (e) {
+      console.error("Failed to fetch Groq key status", e);
+    }
+  };
+
+  const fetchOpenRouterKeyStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/openrouter-key`);
+      const data = await res.json();
+      setOpenrouterKeyStatus(data);
+    } catch (e) {
+      console.error("Failed to fetch OpenRouter key status", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchGeminiKeyStatus();
+    fetchGroqKeyStatus();
+    fetchOpenRouterKeyStatus();
+  }, []);
+
   useEffect(() => {
     if (role) {
       fetchNews(role, country, activeSearch);
     }
   }, [role, country, activeSearch]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
   const fetchNews = async (selectedRole: string, selectedCountry: string, search: string) => {
     setLoadingNews(true);
     try {
-      let url = `http://localhost:8000/news?role=${selectedRole}`;
+      let url = `${API_BASE}/news?role=${selectedRole}`;
       if (selectedCountry !== "all") url += `&country=${selectedCountry}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       
@@ -56,15 +163,26 @@ export default function App() {
   const handleSummarize = async (article: Article) => {
     setActiveStory(article);
     setSummary(null);
+    setNavigatorBrief(null);
+    setStoryArc(null);
+    setActiveTab('summary');
     setLoadingSummary(true);
+    setModelUsed('');
     try {
-      const res = await fetch(`http://localhost:8000/summarize`, {
+      const res = await fetch(`${API_BASE}/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: article.url, title: article.title, description: article.description || "", vernacular: useVernacular })
+        body: JSON.stringify({ 
+          url: article.url, title: article.title, 
+          description: article.description || "", 
+          vernacular: useVernacular,
+          role: role || ""
+        })
       });
       const data = await res.json();
       setSummary(data.summary);
+      if (data.model_used) setModelUsed(data.model_used);
+      if (data.cached) setModelUsed('Cache');
     } catch (e) {
       console.error(e);
       setSummary("Failed to generate summary.");
@@ -72,47 +190,112 @@ export default function App() {
     setLoadingSummary(false);
   };
 
-  const handleChat = async () => {
-    if (!chatInput.trim()) return;
-    const msg = chatInput;
-    // Add user message, and an empty AI message placeholder to be filled via stream
+  const handleNavigator = async () => {
+    if (!activeStory) return;
+    setActiveTab('navigator');
+    setNavigatorBrief(null);
+    setLoadingNavigator(true);
+    setModelUsed('');
+    try {
+      const res = await fetch(`${API_BASE}/navigator`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: activeStory.title, description: activeStory.description || "" })
+      });
+      const data = await res.json();
+      setNavigatorBrief(data.brief);
+      setNavigatorArticles(data.article_titles || []);
+      if (data.model_used) setModelUsed(data.model_used);
+      if (data.cached) setModelUsed('Cache');
+    } catch (e) {
+      console.error(e);
+      setNavigatorBrief({ unified_summary: "Failed to generate navigator briefing." });
+    }
+    setLoadingNavigator(false);
+  };
+
+  const handleStoryArc = async () => {
+    if (!activeStory) return;
+    setActiveTab('storyarc');
+    setStoryArc(null);
+    setLoadingStoryArc(true);
+    setModelUsed('');
+    try {
+      const res = await fetch(`${API_BASE}/story-arc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          topic: activeStory.title,
+          articles: [{ url: activeStory.url, title: activeStory.title, 
+                       description: activeStory.description, publishedAt: activeStory.publishedAt }]
+        })
+      });
+      const data = await res.json();
+      setStoryArc(data.arc);
+      if (data.model_used) setModelUsed(data.model_used);
+      if (data.cached) setModelUsed('Cache');
+    } catch (e) {
+      console.error(e);
+      setStoryArc({ timeline: [], trend_analysis: "Failed to generate story arc." });
+    }
+    setLoadingStoryArc(false);
+  };
+
+  const handleChat = async (overrideMsg?: string) => {
+    const msg = overrideMsg || chatInput;
+    if (!msg.trim()) return;
+    
     setChatMessages(prev => [...prev, { role: 'user', content: msg }, { role: 'ai', content: "" }]);
     setChatInput("");
     setLoadingChat(true);
+    setChatModel('');
 
     try {
-      // Exclude the placeholder AI message we just added
       const historyPayload = chatMessages.slice(-4).map(m => ({ role: m.role, content: m.content }));
       
-      // Inject context stealthily so the AI and RAG search know what we're looking at
-      const apiQuery = activeStory 
-        ? `[Context: I am currently reading the article: "${activeStory.title}"]. ${msg}` 
-        : msg;
-      
-      const res = await fetch(`http://localhost:8000/chat`, {
+      const articleCtx = activeStory 
+        ? `${activeStory.title}. ${activeStory.description || ""}` 
+        : "";
+
+      const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: apiQuery, history: historyPayload })
+        body: JSON.stringify({ 
+          query: msg, 
+          history: historyPayload,
+          article_context: articleCtx,
+          user_role: role || ""
+        })
       });
       
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error("No readable stream");
 
-      setLoadingChat(false); // Hide the loader as soon as we connect and start getting stream
+      setLoadingChat(false);
       
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         
-        const chunk = decoder.decode(value, { stream: true });
-        // Append chunk to the last AI message
+        let chunk = decoder.decode(value, { stream: true });
+        
+        // Parse model indicator token from stream
+        const modelMatch = chunk.match(/__MODEL:(\w+)__/);
+        if (modelMatch) {
+          setChatModel(modelMatch[1]);
+          chunk = chunk.replace(/__MODEL:\w+__/, '');
+        }
+        
+        if (!chunk) continue;
+        
         setChatMessages(prev => {
           const newMessages = [...prev];
-          const lastMsg = newMessages[newMessages.length - 1];
+          const lastMsg = { ...newMessages[newMessages.length - 1] };
           if (lastMsg.role === 'ai') {
              lastMsg.content += chunk;
           }
+          newMessages[newMessages.length - 1] = lastMsg;
           return newMessages;
         });
       }
@@ -121,37 +304,119 @@ export default function App() {
       setLoadingChat(false);
       setChatMessages(prev => {
         const newMessages = [...prev];
-        const lastMsg = newMessages[newMessages.length - 1];
+        const lastMsg = { ...newMessages[newMessages.length - 1] };
         if (lastMsg.role === 'ai' && !lastMsg.content) {
-            lastMsg.content = "Failed to connect to local AI Copilot.";
+            lastMsg.content = "Failed to connect to AI Co-Pilot.";
         }
+        newMessages[newMessages.length - 1] = lastMsg;
         return newMessages;
       });
     }
   };
 
+  const handleQuickAction = (prompt: string) => {
+    handleChat(prompt);
+  };
+
+  const handleSaveGeminiKey = async () => {
+    if (!geminiKeyInput.trim()) return;
+    setSavingKey(true);
+    try {
+      await fetch(`${API_BASE}/api/settings/gemini-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: geminiKeyInput.trim() })
+      });
+      await fetchGeminiKeyStatus();
+      setGeminiKeyInput("");
+    } catch (e) {
+      console.error("Failed to save API key", e);
+    }
+    setSavingKey(false);
+  };
+
+  const handleSaveGroqKey = async () => {
+    if (!groqKeyInput.trim()) return;
+    setSavingGroqKey(true);
+    try {
+      await fetch(`${API_BASE}/api/settings/groq-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: groqKeyInput.trim() })
+      });
+      await fetchGroqKeyStatus();
+      setGroqKeyInput("");
+    } catch (e) {
+      console.error("Failed to save Groq key", e);
+    }
+    setSavingGroqKey(false);
+  };
+
+  const handleSaveOpenRouterKey = async () => {
+    if (!openrouterKeyInput.trim()) return;
+    setSavingOpenrouterKey(true);
+    try {
+      await fetch(`${API_BASE}/api/settings/openrouter-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: openrouterKeyInput.trim() })
+      });
+      await fetchOpenRouterKeyStatus();
+      setOpenrouterKeyInput("");
+    } catch (e) {
+      console.error("Failed to save OpenRouter key", e);
+    }
+    setSavingOpenrouterKey(false);
+  };
+
+  const handleSaveAllSettings = async () => {
+    if (geminiKeyInput.trim()) await handleSaveGeminiKey();
+    if (groqKeyInput.trim()) await handleSaveGroqKey();
+    if (openrouterKeyInput.trim()) await handleSaveOpenRouterKey();
+    setIsSettingsOpen(false);
+  };
+
+  // ── Role Selection Screen ────────────────────────────────────
   if (!role) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-950 to-gray-950 p-6 relative overflow-hidden">
-        {/* Abstract Background Effects */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/20 blur-[120px] rounded-full pointer-events-none"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-600/10 blur-[120px] rounded-full pointer-events-none"></div>
-        
-        <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 mb-6 flex items-center gap-4 z-10 drop-shadow-lg">
-            <Activity className="w-12 h-12 text-emerald-400 drop-shadow-lg" />
+      <div className="flex flex-col items-center justify-center min-h-screen p-6 relative overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
+        {/* Theme toggle on role screen */}
+        <div className="absolute top-6 right-6 z-20">
+          <button onClick={toggleTheme} className="theme-toggle" aria-label="Toggle theme">
+            <div className={`theme-toggle-knob ${isDark ? 'dark-active' : ''}`}>
+              {isDark ? '🌙' : '☀️'}
+            </div>
+          </button>
+        </div>
+
+        <div className="animate-float mb-3">
+          <div className="icon-badge" style={{ padding: '1rem', borderRadius: '20px' }}>
+            <Activity className="w-10 h-10" />
+          </div>
+        </div>
+        <h1 className="text-5xl font-extrabold mb-4 tracking-tight z-10" style={{ color: 'var(--accent-primary)' }}>
             ET IntelliSphere
         </h1>
-        <p className="text-gray-300 mb-12 max-w-lg text-center text-lg z-10 leading-relaxed font-light">Select your perspective to unlock a highly personalized business intelligence feed driven by local AI.</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl z-10">
-          {['Investor', 'Student', 'Founder'].map(r => (
+        <p className="mb-12 max-w-lg text-center text-lg z-10 leading-relaxed font-light" style={{ color: 'var(--text-muted)' }}>
+          AI-native news intelligence platform. Select your perspective to unlock personalized briefings, multi-article analysis, and story tracking.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-4xl z-10">
+          {[
+            { name: 'Investor', emoji: '📈', desc: 'Market signals, risk assessment, and portfolio-relevant intel.' },
+            { name: 'Student', emoji: '🎓', desc: 'Knowledge synthesis, learning insights, and academic relevance.' },
+            { name: 'Founder', emoji: '🚀', desc: 'Competitive landscape, opportunity signals, and strategic intel.' }
+          ].map(r => (
             <button 
-                key={r} 
-                onClick={() => setRole(r)}
-                className="group relative p-8 rounded-3xl bg-gray-900/40 border border-gray-800 backdrop-blur-md hover:border-blue-500/50 hover:shadow-[0_0_40px_-10px_rgba(59,130,246,0.3)] hover:-translate-y-1 transition-all duration-300 text-left overflow-hidden"
+                key={r.name} 
+                onClick={() => setRole(r.name)}
+                className="role-card group text-left"
             >
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                <h3 className="text-3xl font-bold text-white mb-3 tracking-tight">{r}</h3>
-                <p className="text-sm text-gray-400 font-light leading-relaxed">Tailored insights, risk assessment, and market correlation analysis curated for {r.toLowerCase()}s.</p>
+                <span className="text-4xl mb-4 block">{r.emoji}</span>
+                <h3 className="text-2xl font-bold mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>{r.name}</h3>
+                <p className="text-sm font-light leading-relaxed" style={{ color: 'var(--text-muted)' }}>{r.desc}</p>
+                <div className="mt-4 flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--accent-primary)' }}>
+                  Enter <ChevronRight className="w-3 h-3" />
+                </div>
             </button>
           ))}
         </div>
@@ -159,33 +424,98 @@ export default function App() {
     );
   }
 
+  // ── Decision Signal Badge Component ──────────────────────────
+  const DecisionSignal = ({ signal }: { signal: any }) => {
+    if (!signal) return null;
+    const verdict = signal.verdict || "Neutral";
+    const confidence = signal.confidence || "Low";
+    const cls = verdict === "Positive" ? "signal-positive" 
+              : verdict === "Negative" ? "signal-negative" 
+              : "signal-neutral";
+    const confCls = confidence === "High" ? "confidence-high" 
+                  : confidence === "Medium" ? "confidence-medium" 
+                  : "confidence-low";
+    return (
+      <div className={`signal-badge ${cls}`}>
+        <span className={`confidence-dot ${confCls}`}></span>
+        <span>{verdict}</span>
+        <span className="text-xs" style={{ opacity: 0.6 }}>({confidence} confidence)</span>
+      </div>
+    );
+  };
+
+  // ── Loading Skeleton ─────────────────────────────────────────
+  const LoadingSkeleton = () => (
+    <div className="space-y-4 pt-2">
+      {[95, 100, 85, 40, 75, 60].map((w, i) => (
+        <div key={i} className="h-4 loading-shimmer" style={{width: `${w}%`, animationDelay: `${i*150}ms`}}></div>
+      ))}
+    </div>
+  );
+
+  // ── Model Badge Component ───────────────────────────────────
+  const ModelBadge = ({ model }: { model: string }) => {
+    if (!model) return null;
+    const config: Record<string, { emoji: string; color: string; bg: string }> = {
+      'Gemini': { emoji: '✦', color: '#4285f4', bg: 'rgba(66, 133, 244, 0.12)' },
+      'Groq': { emoji: '⚡', color: '#F5402C', bg: 'rgba(245, 64, 44, 0.12)' },
+      'OpenRouter': { emoji: '🌍', color: '#6a0dad', bg: 'rgba(106, 13, 173, 0.12)' },
+      'Ollama': { emoji: '🦙', color: '#43e97b', bg: 'rgba(67, 233, 123, 0.12)' },
+      'Cache': { emoji: '📥', color: 'var(--accent-warning)', bg: 'rgba(246, 173, 85, 0.12)' },
+    };
+    const c = config[model] || { emoji: '🤖', color: 'var(--text-muted)', bg: 'rgba(160,174,192,0.12)' };
+    return (
+      <span 
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold tracking-wide uppercase transition-all animate-fade-in"
+        style={{ color: c.color, background: c.bg, border: `1px solid ${c.color}25` }}
+        title={`Powered by ${model}`}
+      >
+        <span>{c.emoji}</span>{model}
+      </span>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col md:flex-row text-gray-200">
-      {/* Sidebar News Feed */}
-      <div className="w-full md:w-[35%] lg:w-[30%] border-r border-gray-800/60 h-screen overflow-y-auto p-5 custom-scrollbar bg-gray-950/50">
-        <div className="mb-6 backdrop-blur-md sticky top-0 pt-2 pb-4 z-10 bg-gray-950/90 rounded-b-xl border-b border-gray-800/50">
-            <div className="flex justify-between items-center mb-4 px-2">
-                <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2"><Activity className="w-6 h-6 text-blue-500"/> Feed</h2>
+    <div className="min-h-screen flex flex-col md:flex-row" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+      {/* ── Sidebar News Feed ───────────────────────────────────── */}
+      <div className="w-full md:w-[35%] lg:w-[30%] h-screen overflow-y-auto p-5 custom-scrollbar" style={{ background: 'var(--bg-sidebar)' }}>
+        <div className="mb-6 sticky top-0 pt-2 pb-4 z-10" style={{ background: 'var(--bg-sidebar)' }}>
+            <div className="flex justify-between items-center mb-5 px-1">
+                <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                  <div className="icon-badge" style={{ padding: '0.35rem', borderRadius: '10px' }}>
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  Feed
+                </h2>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-semibold px-3 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-full">{role}</span>
-                  <button className="text-xs text-gray-500 hover:text-white transition-colors" onClick={() => setRole(null)}>Reset</button>
+                  {/* Theme Toggle */}
+                  <button onClick={toggleTheme} className="theme-toggle" aria-label="Toggle theme">
+                    <div className={`theme-toggle-knob ${isDark ? 'dark-active' : ''}`}>
+                      {isDark ? '🌙' : '☀️'}
+                    </div>
+                  </button>
+                  <span className="text-xs font-semibold px-3 py-1 neu-subtle" style={{ color: 'var(--accent-primary)' }}>{role}</span>
+                  <button className="neu-btn text-xs" style={{ padding: '0.25rem 0.6rem', color: 'var(--text-muted)', fontSize: '0.7rem' }} onClick={() => setRole(null)}>Reset</button>
+                  <button onClick={() => setIsSettingsOpen(true)} className="neu-btn" style={{ padding: '0.35rem', borderRadius: '10px' }} title="Settings">
+                    <Settings className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                  </button>
                 </div>
             </div>
             
-            {/* Filter & Search Bar */}
-            <div className="flex flex-col gap-3 px-2">
-                <div className="relative group">
+            <div className="flex flex-col gap-3 px-1">
+                <div className="relative">
                     <input 
                         type="text" 
                         placeholder="Search topics..." 
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && setActiveSearch(searchQuery)}
-                        className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-4 pr-10 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50 focus:bg-gray-800/50 transition-all font-light"
+                        className="w-full neu-input pr-10"
                     />
                     <button 
                         onClick={() => setActiveSearch(searchQuery)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-400 transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+                        style={{ color: 'var(--text-faint)' }}
                     >
                         <Search className="w-4 h-4" />
                     </button>
@@ -193,7 +523,7 @@ export default function App() {
                 <select 
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 px-3 text-sm text-gray-200 focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer font-light bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M6%209L12%2015L18%209%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px_16px] bg-[right_12px_center] bg-no-repeat"
+                    className="w-full neu-input cursor-pointer appearance-none"
                 >
                     <option value="all">🌍 Global News</option>
                     <option value="in">🇮🇳 India</option>
@@ -207,11 +537,11 @@ export default function App() {
         {loadingNews ? (
           <div className="space-y-4">
             {[...Array(6)].map((_, i) => (
-              <div key={i} className="animate-pulse flex flex-col gap-3 p-5 bg-gray-900/60 rounded-2xl border border-gray-800/50">
-                <div className="h-5 bg-gray-800 rounded w-4/5"></div>
-                <div className="h-3 bg-gray-800 rounded w-full"></div>
-                <div className="h-3 bg-gray-800 rounded w-11/12"></div>
-                <div className="h-3 bg-gray-800 rounded w-1/4 mt-2"></div>
+              <div key={i} className="flex flex-col gap-3 p-5 neu-soft" style={{ animationDelay: `${i*100}ms` }}>
+                <div className="h-5 loading-shimmer" style={{ width: '80%' }}></div>
+                <div className="h-3 loading-shimmer" style={{ width: '100%' }}></div>
+                <div className="h-3 loading-shimmer" style={{ width: '92%' }}></div>
+                <div className="h-3 loading-shimmer" style={{ width: '25%', marginTop: '0.5rem' }}></div>
               </div>
             ))}
           </div>
@@ -221,13 +551,13 @@ export default function App() {
               <div 
                 key={idx} 
                 onClick={() => handleSummarize(item)}
-                className={`p-5 rounded-2xl cursor-pointer transition-all duration-300 border ${activeStory?.url === item.url ? 'border-emerald-500/50 bg-gray-800/80 shadow-[0_0_20px_-5px_rgba(16,185,129,0.15)]' : 'border-gray-800/40 bg-gray-900/40 hover:bg-gray-800 hover:border-gray-700'}`}
+                className={`news-card ${activeStory?.url === item.url ? 'active' : ''}`}
               >
-                <h3 className="font-semibold text-gray-100 mb-2 leading-snug line-clamp-2">{item.title}</h3>
-                <p className="text-xs text-gray-400 leading-relaxed font-light line-clamp-3">{item.description}</p>
-                <div className="mt-4 text-[11px] text-gray-500 flex justify-between items-center font-medium">
+                <h3 className="font-semibold mb-2 leading-snug line-clamp-2" style={{ color: 'var(--text-primary)' }}>{item.title}</h3>
+                <p className="text-xs leading-relaxed font-light line-clamp-3" style={{ color: 'var(--text-muted)' }}>{item.description}</p>
+                <div className="mt-4 text-[11px] flex justify-between items-center font-medium" style={{ color: 'var(--text-faint)' }}>
                     <span>{new Date(item.publishedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric'})}</span>
-                    <span className="text-emerald-400/90 flex items-center group-hover:text-emerald-300">Intelli-Brief <ChevronRight className="w-3 h-3 ml-0.5 opacity-70"/></span>
+                    <span className="flex items-center" style={{ color: 'var(--accent-primary)' }}>Intelli-Brief <ChevronRight className="w-3 h-3 ml-0.5 opacity-70"/></span>
                 </div>
               </div>
             ))}
@@ -235,142 +565,508 @@ export default function App() {
         )}
       </div>
 
-      {/* Main Content Area */}
-      <div className="w-full md:w-[65%] lg:w-[70%] h-screen overflow-y-auto p-10 relative bg-gray-950">
-        <div className="absolute top-0 right-0 w-full h-1/2 bg-gradient-to-b from-blue-900/5 to-transparent pointer-events-none"></div>
+      {/* ── Main Content Area ───────────────────────────────────── */}
+      <div className="w-full md:w-[65%] lg:w-[70%] h-screen overflow-y-auto p-10 relative custom-scrollbar" style={{ background: 'var(--bg-primary)' }}>
         {activeStory ? (
-            <div className="max-w-4xl mx-auto pb-32 animate-in fade-in duration-500 z-10 relative">
-                <div className="mb-8">
-                  <h1 className="text-4xl font-extrabold text-white mb-4 leading-tight tracking-tight">{activeStory.title}</h1>
-                  <a href={activeStory.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-400/80 hover:text-blue-300 transition-colors inline-block mb-2">Read source article ↗</a>
+            <div className="max-w-4xl mx-auto pb-32 animate-fade-slide-up z-10 relative">
+                {/* Article Header */}
+                <div className="mb-6">
+                  <h1 className="text-4xl font-extrabold mb-4 leading-tight tracking-tight" style={{ color: 'var(--text-primary)' }}>{activeStory.title}</h1>
+                  <a href={activeStory.url} target="_blank" rel="noreferrer" className="text-sm font-medium hover:opacity-80 transition-opacity inline-block mb-2" style={{ color: 'var(--accent-primary)' }}>Read source article ↗</a>
                 </div>
                 
-                <div className="bg-gray-900/60 border border-gray-800 p-8 rounded-3xl shadow-xl shadow-black/40 backdrop-blur-xl relative">
+                {/* Tab Navigation */}
+                <div className="flex items-center gap-3 mb-8 flex-wrap">
+                  <button onClick={() => setActiveTab('summary')} className={`tab-btn ${activeTab === 'summary' ? 'active' : ''}`}>
+                    <Activity className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5"/>AI Brief
+                  </button>
+                  <button onClick={handleNavigator} className={`tab-btn ${activeTab === 'navigator' ? 'active' : ''}`}>
+                    <Zap className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5"/>🧠 Navigator
+                  </button>
+                  <button onClick={handleStoryArc} className={`tab-btn ${activeTab === 'storyarc' ? 'active' : ''}`}>
+                    <Clock className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5"/>📈 Story Arc
+                  </button>
+                  <div className="ml-auto">
+                    <ModelBadge model={modelUsed} />
+                  </div>
+                </div>
+
+                {/* ── TAB: Summary ────────────────────────────── */}
+                {activeTab === 'summary' && (
+                  <div className="content-panel">
                     <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-3">
-                            <span className="bg-gradient-to-br from-emerald-500 to-emerald-700 text-white p-2 rounded-xl shadow-inner shadow-emerald-400/20"><Activity className="w-4 h-4" /></span>
+                        <h2 className="text-lg font-semibold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
+                            <span className="icon-badge"><Activity className="w-4 h-4" /></span>
                             AI Intelligence Brief
                         </h2>
-                        <button onClick={() => setUseVernacular(!useVernacular)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${useVernacular ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}>
-                            {useVernacular ? 'Hinglish Mode ON' : 'Hinglish Mode OFF'}
+                        <button onClick={() => { setUseVernacular(!useVernacular); if(activeStory) handleSummarize(activeStory); }} className={`neu-btn text-xs ${useVernacular ? '' : ''}`} style={{ color: useVernacular ? 'var(--accent-secondary)' : 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            {useVernacular ? '✓ Hinglish ON' : 'Hinglish OFF'}
                         </button>
                     </div>
                     
-                    {loadingSummary ? (
-                        <div className="space-y-4 pt-2">
-                            <div className="h-4 bg-gray-800/80 rounded block animate-pulse" style={{width: '95%', animationDelay: '0ms'}}></div>
-                            <div className="h-4 bg-gray-800/80 rounded block animate-pulse" style={{width: '100%', animationDelay: '100ms'}}></div>
-                            <div className="h-4 bg-gray-800/80 rounded block animate-pulse" style={{width: '85%', animationDelay: '200ms'}}></div>
-                            <div className="h-4 bg-gray-800/80 rounded block animate-pulse mt-6" style={{width: '40%', animationDelay: '300ms'}}></div>
-                            <div className="h-4 bg-gray-800/80 rounded block animate-pulse" style={{width: '75%', animationDelay: '400ms'}}></div>
-                        </div>
-                    ) : summary && typeof summary === 'object' && !summary.error && summary.summary ? (
-                        <div className="space-y-6 animate-in fade-in duration-500">
+                    {loadingSummary ? <LoadingSkeleton /> : summary && typeof summary === 'object' && summary.summary ? (
+                        <div className="space-y-6 animate-fade-slide-up">
+                            {summary.decision_signal && (
+                              <div className="flex items-center gap-3">
+                                <DecisionSignal signal={summary.decision_signal} />
+                              </div>
+                            )}
+
                             <div>
-                                <h3 className="text-emerald-400 font-semibold mb-2 uppercase text-xs tracking-wider border-b border-gray-800 pb-1">AI Executive Summary</h3>
-                                <p className="text-gray-200 font-light leading-relaxed">{summary.summary}</p>
+                                <h3 className="font-semibold mb-2 uppercase text-xs tracking-wider pb-1" style={{ color: 'var(--accent-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>Executive Summary</h3>
+                                <p className="font-light leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{summary.summary}</p>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-900/50 p-4 rounded-xl border border-gray-800/50">
-                                <div>
-                                    <h3 className="text-blue-400 font-semibold mb-1 uppercase text-xs tracking-wider">Why It Matters</h3>
-                                    <p className="text-gray-300 font-light text-sm">{summary.why_it_matters || 'N/A'}</p>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                <div className="insight-card">
+                                    <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#a855f7' }}>📊 Market Impact</h3>
+                                    <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.market_impact || 'N/A'}</p>
                                 </div>
-                                <div>
-                                    <h3 className="text-purple-400 font-semibold mb-1 uppercase text-xs tracking-wider">Market Impact</h3>
-                                    <p className="text-gray-300 font-light text-sm">{summary.market_impact || 'N/A'}</p>
+                                <div className="insight-card">
+                                    <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-danger)' }}>⚡ Risks</h3>
+                                    <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.risks || 'N/A'}</p>
                                 </div>
-                                <div className="mt-2 md:mt-0">
-                                    <h3 className="text-red-400 font-semibold mb-1 uppercase text-xs tracking-wider">Risks</h3>
-                                    <p className="text-gray-300 font-light text-sm">{summary.risks || 'N/A'}</p>
+                                <div className="insight-card">
+                                    <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-info)' }}>🎯 Actionable Insight</h3>
+                                    <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.actionable_insight || 'N/A'}</p>
                                 </div>
-                                <div className="mt-2 md:mt-0">
-                                    <h3 className="text-yellow-400 font-semibold mb-1 uppercase text-xs tracking-wider">Future Prediction</h3>
-                                    <p className="text-gray-300 font-light text-sm">{summary.future_prediction || 'N/A'}</p>
+                                <div className="insight-card">
+                                    <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-warning)' }}>🔮 Future Prediction</h3>
+                                    <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.future_prediction || 'N/A'}</p>
                                 </div>
                             </div>
+
+                            {summary.contrarian_view && (
+                              <div className="insight-card">
+                                <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-warning)' }}>⚠️ Contrarian View</h3>
+                                <p className="font-light text-sm italic" style={{ color: 'var(--text-secondary)' }}>{summary.contrarian_view}</p>
+                              </div>
+                            )}
+
+                            {summary.second_order_effects && (
+                              <div className="insight-card">
+                                <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#818cf8' }}>🌊 Second-Order Effects</h3>
+                                <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.second_order_effects}</p>
+                              </div>
+                            )}
+
+                            {summary.personalized_impact && (
+                              <div className="insight-card">
+                                <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#22d3ee' }}>👤 Impact on You ({role})</h3>
+                                <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.personalized_impact}</p>
+                              </div>
+                            )}
+
+                            {summary.why_it_matters && !summary.actionable_insight && (
+                              <div className="insight-card">
+                                <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-info)' }}>Why It Matters</h3>
+                                <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{summary.why_it_matters}</p>
+                              </div>
+                            )}
                         </div>
                     ) : (
-                        <div className="prose prose-invert prose-emerald max-w-none text-gray-300 font-light leading-relaxed whitespace-pre-wrap CustomMarkdownStyle">
-                            {summary?.error ? <div className="text-red-400 mb-2 border border-red-900/50 bg-red-900/10 p-3 rounded">{summary.error}</div> : null}
-                            {summary?.summary || String(summary)}
+                        <div className="prose max-w-none font-light leading-relaxed whitespace-pre-wrap CustomMarkdownStyle" style={{ color: 'var(--text-secondary)' }}>
+                            {summary?.error ? <div className="p-3 rounded-xl neu-pressed" style={{ color: 'var(--accent-danger)' }}>{summary.error}</div> : null}
+                            {summary?.summary || String(summary || "")}
                         </div>
                     )}
-                </div>
+                  </div>
+                )}
+
+                {/* ── TAB: Navigator ─────────────────────────── */}
+                {activeTab === 'navigator' && (
+                  <div className="content-panel animate-fade-slide-up">
+                    <h2 className="text-lg font-semibold flex items-center gap-3 mb-6" style={{ color: 'var(--text-primary)' }}>
+                      <span className="icon-badge"><Zap className="w-4 h-4" /></span>
+                      🧠 Unified Intelligence Brief
+                    </h2>
+                    
+                    {loadingNavigator ? <LoadingSkeleton /> : navigatorBrief ? (
+                      <div className="space-y-6 animate-fade-slide-up">
+                        {navigatorArticles.length > 0 && (
+                          <div className="text-xs neu-pressed p-4" style={{ color: 'var(--text-faint)' }}>
+                            <span className="font-medium" style={{ color: 'var(--text-muted)' }}>Analyzed {navigatorArticles.length} articles:</span>
+                            <ul className="mt-2 space-y-1">
+                              {navigatorArticles.map((t, i) => (
+                                <li key={i} className="truncate" style={{ color: 'var(--text-faint)' }}>• {t}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div>
+                          <h3 className="font-semibold mb-2 uppercase text-xs tracking-wider pb-1" style={{ color: 'var(--accent-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>Unified Analysis</h3>
+                          <p className="font-light leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.unified_summary}</p>
+                        </div>
+
+                        {navigatorBrief.key_themes?.length > 0 && (
+                          <div>
+                            <h3 className="font-semibold mb-3 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-info)' }}>Key Themes</h3>
+                            <div className="flex flex-wrap gap-2">
+                              {navigatorBrief.key_themes.map((theme: string, i: number) => (
+                                <span key={i} className="theme-tag">{theme}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {navigatorBrief.conflicting_signals?.length > 0 && (
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-2 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-warning)' }}>⚠️ Conflicting Signals</h3>
+                            <ul className="space-y-1.5">
+                              {navigatorBrief.conflicting_signals.map((sig: string, i: number) => (
+                                <li key={i} className="font-light text-sm flex items-start gap-2" style={{ color: 'var(--text-secondary)' }}>
+                                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--accent-warning)' }} />
+                                  {sig}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#a855f7' }}>📊 Market Impact</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.market_impact || 'N/A'}</p>
+                          </div>
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-danger)' }}>⚡ Risks</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.risks || 'N/A'}</p>
+                          </div>
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-secondary)' }}>💎 Opportunities</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.opportunities || 'N/A'}</p>
+                          </div>
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-info)' }}>🎯 Actionable Insight</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.actionable_insight || 'N/A'}</p>
+                          </div>
+                        </div>
+
+                        {navigatorBrief.future_outlook && (
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#22d3ee' }}>🔮 Future Outlook</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{navigatorBrief.future_outlook}</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="font-light text-sm" style={{ color: 'var(--text-faint)' }}>Click the Navigator tab to analyze related articles.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* ── TAB: Story Arc ─────────────────────── */}
+                {activeTab === 'storyarc' && (
+                  <div className="content-panel animate-fade-slide-up">
+                    <h2 className="text-lg font-semibold flex items-center gap-3 mb-6" style={{ color: 'var(--text-primary)' }}>
+                      <span className="icon-badge"><Clock className="w-4 h-4" /></span>
+                      📈 Story Arc Tracker
+                    </h2>
+                    
+                    {loadingStoryArc ? <LoadingSkeleton /> : storyArc ? (
+                      <div className="space-y-6 animate-fade-slide-up">
+                        {storyArc.timeline?.length > 0 && (
+                          <div>
+                            <h3 className="font-semibold mb-4 uppercase text-xs tracking-wider pb-1" style={{ color: 'var(--accent-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>Event Timeline</h3>
+                            <div className="space-y-4 relative">
+                              <div className="timeline-line"></div>
+                              {storyArc.timeline.map((event: any, i: number) => (
+                                <div key={i} className="flex items-start gap-0 relative" style={{animationDelay: `${i*100}ms`}}>
+                                  <div className="timeline-dot"></div>
+                                  <div className="timeline-event">
+                                    <span className="text-[11px] font-mono font-medium" style={{ color: 'var(--accent-info)' }}>{event.date}</span>
+                                    <p className="font-light text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{event.event}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          {storyArc.trend_analysis && (
+                            <div className="insight-card">
+                              <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-info)' }}>📊 Trend Analysis</h3>
+                              <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{storyArc.trend_analysis}</p>
+                            </div>
+                          )}
+                          {storyArc.sentiment_shift && (
+                            <div className="insight-card">
+                              <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#a855f7' }}>💭 Sentiment Shift</h3>
+                              <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{storyArc.sentiment_shift}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {storyArc.key_turning_points?.length > 0 && (
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-2 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-warning)' }}>🔀 Key Turning Points</h3>
+                            <ul className="space-y-1.5">
+                              {storyArc.key_turning_points.map((tp: string, i: number) => (
+                                <li key={i} className="font-light text-sm flex items-start gap-2" style={{ color: 'var(--text-secondary)' }}>
+                                  <Target className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'var(--accent-warning)' }} />
+                                  {tp}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {storyArc.what_changed && (
+                          <div className="insight-card">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: 'var(--accent-secondary)' }}>🔄 What Changed</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{storyArc.what_changed}</p>
+                          </div>
+                        )}
+
+                        {storyArc.what_to_watch_next && (
+                          <div className="insight-card animate-pulse-glow">
+                            <h3 className="font-semibold mb-1.5 uppercase text-xs tracking-wider" style={{ color: '#22d3ee' }}>👁️ What to Watch Next</h3>
+                            <p className="font-light text-sm" style={{ color: 'var(--text-secondary)' }}>{storyArc.what_to_watch_next}</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="font-light text-sm" style={{ color: 'var(--text-faint)' }}>Click the Story Arc tab to track this story over time.</p>
+                    )}
+                  </div>
+                )}
             </div>
         ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center opacity-40 z-10 relative hover:opacity-60 transition-opacity">
-                <div className="p-6 rounded-full bg-gray-800/30 border border-gray-700/50 mb-6">
-                  <Activity className="w-12 h-12 text-gray-500" />
+            <div className="flex flex-col items-center justify-center h-full text-center z-10 relative">
+                <div className="neu-convex p-8 rounded-full mb-6 animate-float" style={{ borderRadius: '50%' }}>
+                  <Activity className="w-12 h-12" style={{ color: 'var(--text-faint)' }} />
                 </div>
-                <h2 className="text-2xl font-semibold text-gray-300">Select an article for AI Briefing</h2>
-                <p className="text-sm text-gray-500 mt-3 max-w-sm font-light">Leveraging local precision AI to extract complex market indicators, impact analysis, and customized takeaways.</p>
+                <h2 className="text-2xl font-semibold" style={{ color: 'var(--text-secondary)' }}>Select an article for AI Briefing</h2>
+                <p className="text-sm mt-3 max-w-sm font-light" style={{ color: 'var(--text-faint)' }}>Multi-article intelligence, story arc tracking, decision signals, and context-aware chat — all powered by hybrid AI.</p>
             </div>
         )}
       </div>
 
-      {/* Chat Copilot Floating Button */}
+      {/* ── Chat Copilot Floating Button ────────────────────────── */}
       {!isChatOpen && (
           <button 
             onClick={() => setIsChatOpen(true)}
-            className="fixed bottom-8 right-8 z-50 bg-gradient-to-tr from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-white p-4 rounded-full shadow-[0_0_30px_-5px_var(--tw-shadow-color)] shadow-blue-500/40 hover:scale-110 transition-all duration-300"
+            className="fixed bottom-8 right-8 z-50 neu-btn-accent p-4 hover:scale-110 transition-all duration-300"
+            style={{ borderRadius: '50%', boxShadow: '0 8px 32px rgba(108, 99, 255, 0.4), var(--neu-soft)' }}
           >
             <MessageSquare className="w-6 h-6" />
           </button>
       )}
 
-      {/* Chat Copilot Panel */}
+      {/* ── Chat Copilot Panel ─────────────── */}
       {isChatOpen && (
-          <div className="fixed bottom-8 right-8 w-[420px] h-[650px] bg-gray-900 border border-gray-700/80 rounded-3xl shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300 z-50">
-              <div className="p-5 bg-gray-800/90 backdrop-blur-md border-b border-gray-700/60 flex justify-between items-center shadow-sm">
-                  <h3 className="font-semibold text-white flex items-center gap-2"><MessageSquare className="w-4 h-4 text-emerald-400"/> Context Co-Pilot</h3>
-                  <button onClick={() => setIsChatOpen(false)} className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-gray-700/50 transition-colors">
-                      <X className="w-5 h-5"/>
+          <div className="fixed bottom-8 right-8 w-[420px] h-[680px] chat-panel flex flex-col animate-fade-slide-up z-50">
+              <div className="p-5 chat-header flex justify-between items-center">
+                  <div>
+                    <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                      <MessageSquare className="w-4 h-4" style={{ color: 'var(--accent-primary)' }}/>
+                      Context Co-Pilot
+                      <ModelBadge model={chatModel} />
+                    </h3>
+                    {activeStory && <p className="text-[10px] mt-0.5 truncate max-w-[280px]" style={{ color: 'var(--text-faint)' }}>📎 {activeStory.title}</p>}
+                  </div>
+                  <button onClick={() => setIsChatOpen(false)} className="neu-btn" style={{ padding: '0.35rem', borderRadius: '10px' }}>
+                      <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }}/>
                   </button>
               </div>
               
-              <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-5 custom-scrollbar bg-gradient-to-b from-gray-900 to-gray-950">
+              <div className="flex-1 p-5 overflow-y-auto flex flex-col gap-4 custom-scrollbar" style={{ background: 'var(--bg-primary)' }}>
                   {chatMessages.length === 0 && (
-                      <div className="text-center text-gray-500 my-auto text-sm font-light px-8">
-                          Chat directly with the AI about any story in your feed. Context is automatically managed using local RAG.
+                      <div className="text-center my-auto text-sm font-light px-6" style={{ color: 'var(--text-faint)' }}>
+                          <div className="neu-convex p-4 mx-auto mb-4 inline-block" style={{ borderRadius: '50%' }}>
+                            <MessageSquare className="w-6 h-6" style={{ color: 'var(--text-faint)', opacity: 0.5 }} />
+                          </div>
+                          <p>Ask about implications, risks, or opportunities. Context from your current article and role is automatically included.</p>
                       </div>
                   )}
                   {chatMessages.map((m, i) => (
                       <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm font-light leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-blue-600/90 border border-blue-500/50 text-white rounded-tr-md' : 'bg-gray-800 border border-gray-700/50 text-gray-200 rounded-tl-md'}`}>
-                              {m.content}
+                          <div className={`max-w-[85%] p-3.5 text-sm font-light leading-relaxed ${m.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'}`}>
+                              {m.content ? (
+                                <ReactMarkdown
+                                  components={{
+                                    strong: ({node, ...props}) => <strong className="font-semibold" style={{ color: m.role === 'user' ? 'white' : 'var(--text-primary)' }} {...props} />,
+                                    p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
+                                    ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3 last:mb-0 space-y-1" {...props} />,
+                                    ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-3 last:mb-0 space-y-1" {...props} />,
+                                    li: ({node, ...props}) => <li className="" {...props} />
+                                  }}
+                                >
+                                  {m.content}
+                                </ReactMarkdown>
+                              ) : <span className="italic" style={{ color: 'var(--text-faint)' }}>Thinking...</span>}
                           </div>
                       </div>
                   ))}
                   {loadingChat && (
                       <div className="flex justify-start">
-                          <div className="bg-gray-800 border border-gray-700/50 p-3.5 rounded-2xl rounded-tl-md text-gray-400 flex items-center gap-3 text-sm shadow-sm font-light">
-                              <Loader2 className="w-4 h-4 animate-spin text-emerald-500"/> Reading context...
+                          <div className="chat-msg-ai p-3.5 flex items-center gap-3 text-sm font-light" style={{ color: 'var(--text-muted)' }}>
+                              <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--accent-primary)' }}/> Analyzing context...
                           </div>
                       </div>
                   )}
                   <div ref={chatEndRef} />
               </div>
 
-              <div className="p-4 bg-gray-800/90 backdrop-blur-md border-t border-gray-700/60">
-                  <div className="relative group/input">
+              {/* Quick Actions */}
+              <div className="px-4 pt-2 pb-1 flex gap-1.5 flex-wrap" style={{ background: 'var(--bg-secondary)' }}>
+                {QUICK_ACTIONS.map((action, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => handleQuickAction(action.prompt)}
+                    disabled={loadingChat}
+                    className="quick-action disabled:opacity-30"
+                  >
+                    {action.icon} {action.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="p-4 chat-header" style={{ borderTop: '1px solid var(--border-subtle)', borderBottom: 'none' }}>
+                  <div className="relative">
                       <input 
                           type="text" 
-                          placeholder="Ask about implications or risks..." 
+                          placeholder="Ask about implications, risks, strategy..." 
                           value={chatInput}
                           onChange={e => setChatInput(e.target.value)}
                           onKeyDown={e => e.key === 'Enter' && handleChat()}
-                          className="w-full bg-gray-950/50 border border-gray-700/80 rounded-full py-3.5 px-5 pr-12 text-sm text-gray-200 font-light focus:outline-none focus:border-emerald-500/50 focus:bg-gray-900 transition-all shadow-inner"
+                          className="w-full neu-input pr-12"
+                          style={{ borderRadius: '9999px', padding: '0.85rem 1.25rem' }}
                       />
                       <button 
-                          onClick={handleChat}
+                          onClick={() => handleChat()}
                           disabled={!chatInput.trim() || loadingChat}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-emerald-600 rounded-full text-white disabled:opacity-50 disabled:bg-gray-700 hover:bg-emerald-500 active:scale-95 transition-all shadow-sm group-focus-within/input:shadow-[0_0_15px_-3px_var(--tw-shadow-color)] group-focus-within/input:shadow-emerald-500/40"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 neu-btn-accent disabled:opacity-50 active:scale-95 transition-all"
+                          style={{ borderRadius: '50%', padding: '0.5rem' }}
                       >
                           <Send className="w-4 h-4 ml-0.5" />
                       </button>
                   </div>
               </div>
           </div>
+      )}
+      {/* ── Settings Modal ───────────────────────────────────────── */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center animate-fade-in" style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)' }}>
+          <div className="content-panel max-w-md w-full mx-4" style={{ boxShadow: '20px 20px 40px var(--shadow-dark-strong), -20px -20px 40px var(--shadow-light-strong)' }}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                <span className="icon-badge" style={{ padding: '0.35rem', borderRadius: '10px' }}><Settings className="w-4 h-4" /></span>
+                Settings
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="neu-btn" style={{ padding: '0.35rem', borderRadius: '10px' }}>
+                <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }}/>
+              </button>
+            </div>
+            
+            <div className="space-y-5">
+              {/* Theme Setting */}
+              <div className="neu-pressed p-4" style={{ borderRadius: '16px' }}>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Appearance</label>
+                    <p className="text-xs font-light" style={{ color: 'var(--text-faint)' }}>{isDark ? 'Dark mode active' : 'Light mode active'}</p>
+                  </div>
+                  <button onClick={toggleTheme} className="theme-toggle" aria-label="Toggle theme">
+                    <div className={`theme-toggle-knob ${isDark ? 'dark-active' : ''}`}>
+                      {isDark ? '🌙' : '☀️'}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Gemini API Key */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Gemini API Key</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password"
+                    placeholder={geminiKeyStatus.is_set ? `Current: ${geminiKeyStatus.masked_key}` : "Enter your Google Gemini API Key"}
+                    value={geminiKeyInput}
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                    className="w-full neu-input"
+                  />
+                  {geminiKeyStatus.is_set && <span className="self-center text-xs" style={{ color: 'var(--accent-secondary)' }}>✓</span>}
+                </div>
+                <p className="text-xs mt-2 font-light" style={{ color: 'var(--text-faint)' }}>
+                  Primary AI model. Get from <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>Google AI Studio</a>.
+                </p>
+              </div>
+
+              {/* Groq Key */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Groq API Key</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password"
+                    placeholder={groqKeyStatus.is_set ? `Current: ${groqKeyStatus.masked_key}` : "Enter your Groq API Key"}
+                    value={groqKeyInput}
+                    onChange={(e) => setGroqKeyInput(e.target.value)}
+                    className="w-full neu-input"
+                  />
+                  {groqKeyStatus.is_set && <span className="self-center text-xs" style={{ color: 'var(--accent-secondary)' }}>✓</span>}
+                </div>
+                <p className="text-xs mt-2 font-light" style={{ color: 'var(--text-faint)' }}>
+                  Lightning fast LLaMA 3 inference. Get from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>Groq Console</a>.
+                </p>
+              </div>
+
+              {/* OpenRouter Key */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>OpenRouter API Key</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password"
+                    placeholder={openrouterKeyStatus.is_set ? `Current: ${openrouterKeyStatus.masked_key}` : "Enter your OpenRouter API Key"}
+                    value={openrouterKeyInput}
+                    onChange={(e) => setOpenrouterKeyInput(e.target.value)}
+                    className="w-full neu-input"
+                  />
+                  {openrouterKeyStatus.is_set && <span className="self-center text-xs" style={{ color: 'var(--accent-secondary)' }}>✓</span>}
+                </div>
+                <p className="text-xs mt-2 font-light" style={{ color: 'var(--text-faint)' }}>
+                  Deep fallback router. Get from <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>OpenRouter</a>.
+                </p>
+              </div>
+
+              {/* Fallback Chain Info */}
+              <div className="neu-pressed p-4" style={{ borderRadius: '16px' }}>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>AI Fallback Chain</label>
+                <div className="flex items-center gap-2 text-xs font-medium">
+                  <span className="px-2 py-1 rounded-lg" style={{ background: geminiKeyStatus.is_set ? 'rgba(67, 233, 123, 0.15)' : 'rgba(252, 92, 101, 0.15)', color: geminiKeyStatus.is_set ? 'var(--accent-secondary)' : 'var(--accent-danger)' }}>Gemini</span>
+                  <span style={{ color: 'var(--text-faint)' }}>→</span>
+                  <span className="px-2 py-1 rounded-lg" style={{ background: groqKeyStatus.is_set ? 'rgba(67, 233, 123, 0.15)' : 'rgba(252, 92, 101, 0.15)', color: groqKeyStatus.is_set ? 'var(--accent-secondary)' : 'var(--accent-danger)' }}>Groq</span>
+                  <span style={{ color: 'var(--text-faint)' }}>→</span>
+                  <span className="px-2 py-1 rounded-lg" style={{ background: openrouterKeyStatus.is_set ? 'rgba(67, 233, 123, 0.15)' : 'rgba(252, 92, 101, 0.15)', color: openrouterKeyStatus.is_set ? 'var(--accent-secondary)' : 'var(--accent-danger)' }}>OpenRouter</span>
+                  <span style={{ color: 'var(--text-faint)' }}>→</span>
+                  <span className="px-2 py-1 rounded-lg" style={{ background: 'rgba(246, 173, 85, 0.15)', color: 'var(--accent-warning)' }}>Ollama (local)</span>
+                </div>
+                <p className="text-xs mt-2 font-light" style={{ color: 'var(--text-faint)' }}>
+                  If the primary model fails, the system automatically tries the next one.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="neu-btn text-sm"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveAllSettings}
+                disabled={(savingKey || savingGroqKey || savingOpenrouterKey) || (!geminiKeyInput.trim() && !groqKeyInput.trim() && !openrouterKeyInput.trim())}
+                className="neu-btn-accent text-sm disabled:opacity-50 flex items-center gap-2"
+              >
+                {(savingKey || savingGroqKey || savingOpenrouterKey) ? <Loader2 className="w-4 h-4 animate-spin"/> : null}
+                Save Settings
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
