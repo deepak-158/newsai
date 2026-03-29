@@ -544,30 +544,36 @@ Keep sentences short and conversational. Remove any markdown or special characte
 async def generate_audio_endpoint(req: AudioRequest):
     """Generates an AI audio brief using Piper TTS."""
     from ai.llama_inference import _call_with_fallback
+    import re
     
     # Clean the article ID for the response URL
     safe_article_id = "".join([c if c.isalnum() else "_" for c in req.article_id])
     
-    script = req.text.strip() if req.text else ""
-    if not script:
-        # Generate script using AI (no text provided)
-        prompt = f"""Convert this news into a short audio briefing:
+    # The frontend passes the article content in req.text. 
+    # We will ALWAYS use the AI to convert this text into a proper audio script.
+    article_content = req.text.strip() if req.text else req.article_id
+    
+    prompt = f"""Convert this news into a short audio briefing:
 
-{req.article_id}
+{article_content}
 
 * Hook (1 line)
-* 3–4 key insights
+* 3-4 key insights
 * Final takeaway
 
-Keep it clear, concise, and under 60 seconds. Return ONLY the plain text script without markdown formatting."""
-        try:
-            script = _call_with_fallback(prompt)
-            # Cleanup AI output removing markdown formatting
-            script = script.replace('*', '').replace('#', '').strip()
-        except Exception as e:
-            # Check if it was manually triggered or from UI, return graceful response
-            print(f"Failed to generate audio script: {str(e)}")
-            return JSONResponse(status_code=500, content={"detail": f"Failed to generate AI script: {str(e)}"})
+Keep it clear, concise, and under 60 seconds. Return ONLY the plain text script without markdown formatting. Do not include asterisks, hashtags, or emojis."""
+
+    try:
+        script = _call_with_fallback(prompt)
+        # Cleanup AI output removing markdown formatting and emojis that break Piper
+        script = script.replace('*', '').replace('#', '').strip()
+        script = re.sub(r'[^\w\s,.!?\'"-]', '', script)  # Remove emojis and strange symbols
+    except Exception as e:
+        print(f"Failed to generate audio script: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": f"Failed to generate AI script: {str(e)}"})
+        
+    if len(script) < 5:
+        return JSONResponse(status_code=500, content={"detail": "AI returned an empty script."})
             
     # Enforce rough length limit to ensure it completes under 60 seconds
     if len(script) > 1500:
