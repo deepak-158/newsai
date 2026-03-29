@@ -46,6 +46,13 @@ export default function App() {
   const [storyArc, setStoryArc] = useState<any>(null);
   const [loadingStoryArc, setLoadingStoryArc] = useState(false);
 
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [loadingVideo, setLoadingVideo] = useState(false);
+  const [videoModelUsed, setVideoModelUsed] = useState<string>('');
+
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+
   // Model tracking
   const [modelUsed, setModelUsed] = useState<string>('');
   const [chatModel, setChatModel] = useState<string>('');
@@ -71,6 +78,12 @@ export default function App() {
   const [openrouterKeyInput, setOpenrouterKeyInput] = useState("");
   const [openrouterKeyStatus, setOpenrouterKeyStatus] = useState<{is_set: boolean, masked_key: string}>({is_set: false, masked_key: ""});
   const [savingOpenrouterKey, setSavingOpenrouterKey] = useState(false);
+
+  // D-ID key
+  const [didKeyInput, setDidKeyInput] = useState("");
+  const [didKeyStatus, setDidKeyStatus] = useState<{is_set: boolean, masked_key: string}>({is_set: false, masked_key: ""});
+  const [savingDidKey, setSavingDidKey] = useState(false);
+
 
   // Theme state
   const [isDark, setIsDark] = useState(true);
@@ -128,10 +141,21 @@ export default function App() {
     }
   };
 
+  const fetchDidKeyStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings/did-key`);
+      const data = await res.json();
+      setDidKeyStatus(data);
+    } catch (e) {
+      console.error("Failed to fetch D-ID key status", e);
+    }
+  };
+
   useEffect(() => {
     fetchGeminiKeyStatus();
     fetchGroqKeyStatus();
     fetchOpenRouterKeyStatus();
+    fetchDidKeyStatus();
   }, []);
 
   useEffect(() => {
@@ -165,6 +189,9 @@ export default function App() {
     setSummary(null);
     setNavigatorBrief(null);
     setStoryArc(null);
+    setVideoUrl(null);
+    setVideoModelUsed('');
+    setAudioUrl(null);
     setActiveTab('summary');
     setLoadingSummary(true);
     setModelUsed('');
@@ -239,6 +266,61 @@ export default function App() {
       setStoryArc({ timeline: [], trend_analysis: "Failed to generate story arc." });
     }
     setLoadingStoryArc(false);
+  };
+
+  const handleGenerateVideo = async () => {
+    if (!activeStory) return;
+    setLoadingVideo(true);
+    setVideoModelUsed('');
+    try {
+      const res = await fetch(`${API_BASE}/generate-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          article_id: activeStory.url, 
+          text: activeStory.content || activeStory.description || activeStory.title 
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.video_url) {
+        setVideoUrl(data.video_url);
+        if (data.model_used) setVideoModelUsed(data.model_used);
+        if (data.cached) setVideoModelUsed('Cache');
+      } else {
+        console.error("Video generation failed", data);
+        alert("Failed to generate AI video. See console for details.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error calling video generation service.");
+    }
+    setLoadingVideo(false);
+  };
+
+  const handleGenerateAudio = async () => {
+    if (!activeStory) return;
+    setLoadingAudio(true);
+    try {
+      const res = await fetch(`${API_BASE}/generate-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          article_id: activeStory.url, 
+          text: activeStory.content || activeStory.description || activeStory.title 
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.audio_url) {
+        setAudioUrl(`${API_BASE}${data.audio_url}`);
+      } else {
+        console.error("Audio generation failed", data);
+        alert("Failed to generate AI Audio. Ensure Piper TTS is installed.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error calling audio generation service.");
+    }
+    setLoadingAudio(false);
   };
 
   const handleChat = async (overrideMsg?: string) => {
@@ -369,10 +451,28 @@ export default function App() {
     setSavingOpenrouterKey(false);
   };
 
+  const handleSaveDidKey = async () => {
+    if (!didKeyInput.trim()) return;
+    setSavingDidKey(true);
+    try {
+      await fetch(`${API_BASE}/api/settings/did-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: didKeyInput.trim() })
+      });
+      await fetchDidKeyStatus();
+      setDidKeyInput("");
+    } catch (e) {
+      console.error("Failed to save D-ID key", e);
+    }
+    setSavingDidKey(false);
+  };
+
   const handleSaveAllSettings = async () => {
     if (geminiKeyInput.trim()) await handleSaveGeminiKey();
     if (groqKeyInput.trim()) await handleSaveGroqKey();
     if (openrouterKeyInput.trim()) await handleSaveOpenRouterKey();
+    if (didKeyInput.trim()) await handleSaveDidKey();
     setIsSettingsOpen(false);
   };
 
@@ -586,10 +686,103 @@ export default function App() {
                   <button onClick={handleStoryArc} className={`tab-btn ${activeTab === 'storyarc' ? 'active' : ''}`}>
                     <Clock className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5"/>📈 Story Arc
                   </button>
-                  <div className="ml-auto">
-                    <ModelBadge model={modelUsed} />
+                  <div className="ml-auto flex items-center gap-4">
+                    <button 
+                      onClick={handleGenerateAudio} 
+                      disabled={loadingAudio}
+                      className="tab-btn font-semibold shadow-sm transition-all" 
+                      style={{ 
+                        background: loadingAudio ? 'var(--neu-bg)' : 'var(--accent-secondary)', 
+                        color: loadingAudio ? 'var(--text-muted)' : '#fff', 
+                        border: 'none',
+                        padding: '0.4rem 1rem'
+                      }}
+                    >
+                      {loadingAudio ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin"/> : "🎧 "}
+                      Listen
+                    </button>
+                    <button 
+                      onClick={handleGenerateVideo} 
+                      disabled={loadingVideo}
+                      className="tab-btn font-semibold shadow-sm transition-all" 
+                      style={{ 
+                        background: loadingVideo ? 'var(--neu-bg)' : 'var(--accent-primary)', 
+                        color: loadingVideo ? 'var(--text-muted)' : '#fff', 
+                        border: 'none',
+                        padding: '0.4rem 1rem'
+                      }}
+                    >
+                      {loadingVideo ? <Loader2 className="w-3.5 h-3.5 inline mr-1.5 animate-spin"/> : "🎥 "}
+                      Generate AI Video
+                    </button>
+                    <div className="border-l pl-4 border-[var(--border-subtle)]">
+                      <ModelBadge model={modelUsed} />
+                    </div>
                   </div>
                 </div>
+
+                {/* ── AI Avatar Video Player ────────────────────────────── */}
+                {(loadingVideo || videoUrl) && (
+                  <div className="content-panel mb-8 animate-fade-slide-up bg-opacity-50">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-semibold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
+                            <span className="icon-badge"><Eye className="w-4 h-4" /></span>
+                            AI Anchor Video
+                        </h2>
+                        {videoModelUsed && <ModelBadge model={videoModelUsed} />}
+                    </div>
+                    {loadingVideo ? (
+                      <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <Loader2 className="w-8 h-8 animate-spin mb-4" style={{ color: 'var(--accent-primary)' }}/>
+                        <p className="font-medium animate-pulse text-sm" style={{ color: 'var(--text-secondary)' }}>
+                           Generating AI avatar video... (this may take 30-60 seconds)
+                        </p>
+                      </div>
+                    ) : (
+                      videoUrl && (
+                        <div className="w-full flex justify-center rounded-xl overflow-hidden bg-black relative" style={{ minHeight: '300px' }}>
+                          <video 
+                            controls 
+                            className="w-full h-auto object-contain max-h-[500px]"
+                            src={videoUrl}
+                          />
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {/* ── AI Audio Player ────────────────────────────── */}
+                {(loadingAudio || audioUrl) && (
+                  <div className="content-panel mb-8 animate-fade-slide-up bg-opacity-50">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-semibold flex items-center gap-3" style={{ color: 'var(--text-primary)' }}>
+                            <span className="icon-badge">🎧</span>
+                            AI Audio Brief
+                        </h2>
+                    </div>
+                    {loadingAudio ? (
+                      <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <Loader2 className="w-6 h-6 animate-spin mb-3" style={{ color: 'var(--accent-secondary)' }}/>
+                        <p className="font-medium animate-pulse text-sm" style={{ color: 'var(--text-secondary)' }}>
+                           Generating audio briefing...
+                        </p>
+                      </div>
+                    ) : (
+                      audioUrl && (
+                        <div className="w-full flex justify-center p-4 rounded-xl neu-pressed">
+                          <audio 
+                            controls 
+                            autoPlay
+                            className="w-full"
+                            style={{ height: '40px', outline: 'none' }}
+                            src={audioUrl}
+                          />
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
 
                 {/* ── TAB: Summary ────────────────────────────── */}
                 {activeTab === 'summary' && (
@@ -1031,6 +1224,24 @@ export default function App() {
                 </p>
               </div>
 
+              {/* D-ID Key */}
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>D-ID API Key (Video Gen)</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="password"
+                    placeholder={didKeyStatus.is_set ? `Current: ${didKeyStatus.masked_key}` : "Enter your D-ID API Key"}
+                    value={didKeyInput}
+                    onChange={(e) => setDidKeyInput(e.target.value)}
+                    className="w-full neu-input"
+                  />
+                  {didKeyStatus.is_set && <span className="self-center text-xs" style={{ color: 'var(--accent-secondary)' }}>✓</span>}
+                </div>
+                <p className="text-xs mt-2 font-light" style={{ color: 'var(--text-faint)' }}>
+                  Required for AI Avatar Video generation. Get from <a href="https://studio.d-id.com/settings/api" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>D-ID Studio</a>.
+                </p>
+              </div>
+
               {/* Fallback Chain Info */}
               <div className="neu-pressed p-4" style={{ borderRadius: '16px' }}>
                 <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>AI Fallback Chain</label>
@@ -1058,10 +1269,10 @@ export default function App() {
               </button>
               <button 
                 onClick={handleSaveAllSettings}
-                disabled={(savingKey || savingGroqKey || savingOpenrouterKey) || (!geminiKeyInput.trim() && !groqKeyInput.trim() && !openrouterKeyInput.trim())}
+                disabled={(savingKey || savingGroqKey || savingOpenrouterKey || savingDidKey) || (!geminiKeyInput.trim() && !groqKeyInput.trim() && !openrouterKeyInput.trim() && !didKeyInput.trim())}
                 className="neu-btn-accent text-sm disabled:opacity-50 flex items-center gap-2"
               >
-                {(savingKey || savingGroqKey || savingOpenrouterKey) ? <Loader2 className="w-4 h-4 animate-spin"/> : null}
+                {(savingKey || savingGroqKey || savingOpenrouterKey || savingDidKey) ? <Loader2 className="w-4 h-4 animate-spin"/> : null}
                 Save Settings
               </button>
             </div>

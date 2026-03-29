@@ -23,6 +23,8 @@ ET IntelliSphere is an AI-native news intelligence platform that provides dynami
 - **Cache**: Redis for rapid API response caching and NewsData results.
 - **Vector Database**: FAISS (Facebook AI Similarity Search) for local, fast RAG vector storage.
 - **News Source**: NewsData.io API integration for fetching real-time business and finance news.
+- **Local Audio**: Dedicated subprocess orchestration executing `piper` TTS locally for offline audio synthesis.
+- **Video Generation**: Integration with external APIs (D-ID) to generate synthesized video anchors.
 
 ---
 
@@ -79,6 +81,12 @@ Tracks how a given news topic has evolved over time. Retrieves historical contex
 
 ### 5. `POST /chat` (Streaming)
 WebSocket/SSE stream endpoint. Takes user queries and leverages FAISS RAG to inject the active article context and conversation history. Streams chunks back to the client, prepended with a `__MODEL:Name__` tag for frontend tracking.
+
+### 6. `POST /generate-video`
+Integrates with the D-ID API to generate a realistic video of an AI news anchor reporting the given article text. Requires heavy audio-visual processing resulting in TTS wait times (~30-60s). Includes robust backend caching (`audio/` and redis) to avoid redundant costly calls to external APIs.
+
+### 7. `POST /generate-audio`
+Utilizes a fully local `piper` TTS subprocess to convert the generated intelligence brief into an under-60-second `.wav` stream. Operates with an absolute timeout of 60 seconds and gracefully handles execution failures if the model (`en_US-lessac-medium.onnx`) is missing. Uses FastAPI `StaticFiles` route `/audio` to serve the resulting files directly to the client's HTML5 `<audio>` player.
 
 ---
 

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3:8b")
     FAISS_INDEX_PATH: str = os.getenv("FAISS_INDEX_PATH", "./data/faiss_index")
+    DID_API_KEY: str = os.getenv("DID_API_KEY", "")
+    DID_AVATAR_URL: str = os.getenv("DID_AVATAR_URL", "")
 
     class Config:
         env_file = ".env"

@@ -12,14 +12,18 @@ from ai.rag_pipeline import (
 )
 from ai.llama_inference import (
     generate_summary, generate_chat_response, generate_navigator_brief,
-    generate_story_arc
+    generate_story_arc, _call_with_fallback
 )
+from services.video_service import generate_avatar_video
 from db.redis_cache import get_cache, set_cache
 import ai.faiss_store as faiss_store
 import time
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from services.audio_service import generate_audio as generate_audio_service
+import os
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, max_requests: int = 5, window: int = 60):
@@ -58,6 +62,11 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         return response
 
 app = FastAPI(title="ET IntelliSphere API")
+
+# Ensure audio directory exists and mount it
+audio_dir = os.path.join(os.path.dirname(__file__), "audio")
+os.makedirs(audio_dir, exist_ok=True)
+app.mount("/audio", StaticFiles(directory=audio_dir), name="audio")
 
 app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(
@@ -106,6 +115,14 @@ class StoryArcRequest(BaseModel):
 
 class UpdateKeyRequest(BaseModel):
     api_key: str
+
+class VideoRequest(BaseModel):
+    article_id: str
+    text: str = ""
+
+class AudioRequest(BaseModel):
+    article_id: str
+    text: Optional[str] = ""
 
 # ── Existing Endpoints ──────────────────────────────────────────────────────
 
@@ -244,6 +261,48 @@ async def update_openrouter_key(req: UpdateKeyRequest):
         f.writelines(new_lines)
         
     return {"status": "success", "message": "OpenRouter API key updated"}
+
+# ── D-ID Settings ───────────────────────────────────────────────────────────
+
+@app.get("/api/settings/did-key")
+async def get_did_key():
+    from core.config import settings
+    token = settings.DID_API_KEY
+    if token:
+        masked = token[:8] + "*" * (len(token) - 8) if len(token) > 8 else "***"
+        return {"is_set": True, "masked_key": masked}
+    return {"is_set": False, "masked_key": ""}
+
+@app.post("/api/settings/did-key")
+async def update_did_key(req: UpdateKeyRequest):
+    from core.config import settings
+    import os
+    
+    settings.DID_API_KEY = req.api_key
+    
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+            
+    new_lines = []
+    key_found = False
+    for line in lines:
+        if line.startswith("DID_API_KEY="):
+            new_lines.append(f"DID_API_KEY={req.api_key}\n")
+            key_found = True
+        else:
+            new_lines.append(line)
+            
+    if not key_found:
+        new_lines.append(f"DID_API_KEY={req.api_key}\n")
+        
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+        
+    return {"status": "success", "message": "D-ID API key updated"}
+
 
 
 @app.post("/summarize")
@@ -422,3 +481,106 @@ async def get_topics():
     """Returns all topics being tracked for story arcs."""
     from db.sqlite import get_tracked_topics
     return {"topics": get_tracked_topics()}
+
+# ── AI Video Generation ─────────────────────────────────────────────────────
+
+@app.post("/generate-video")
+async def generate_video(req: VideoRequest):
+    """Generates an AI avatar video summarizing the news article."""
+    # 1. Check cache first
+    cache_key = f"video_{req.article_id}"
+    cached_url = get_cache(cache_key)
+    if cached_url:
+        return {
+            "video_url": cached_url,
+            "status": "ready",
+            "model_used": "cache"
+        }
+        
+    # 2. Prepare script
+    script = req.text.strip()
+    if not script:
+        # Generate script using AI (no text provided)
+        prompt = f"""Convert this news into a short video script:
+{req.article_id}
+- Hook (1 line)
+- 3–4 key points
+- Conclusion (1 line)
+Keep sentences short and conversational. Remove any markdown or special characters formatting like * or # as this will be read by text-to-speech. Return EXACTLY the plain text script."""
+        try:
+            script = _call_with_fallback(prompt)
+            # Cleanup AI output in case it still included markdown
+            script = script.replace('*', '').replace('#', '').strip()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate video script: {str(e)}")
+            
+    # Fallback if script is suspiciously short or empty
+    if len(script) < 10:
+        script = "Welcome to the news update. Here are the top stories for today. Stay tuned for more."
+        
+    # Enforce rough length limit (D-ID can be slow/expensive with long text)
+    if len(script) > 1000:
+        script = script[:997] + "..."
+
+    # 3. Call D-ID Service
+    try:
+        video_url = generate_avatar_video(script)
+        # Cache the result permanently (or for a long time)
+        set_cache(cache_key, video_url, expiration=86400 * 7) # Cache for 7 days
+        return {
+            "video_url": video_url,
+            "status": "ready",
+            "model_used": "d-id"
+        }
+    except Exception as e:
+        # Check if it's already an HTTPException from the service
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── AI Audio Generation ─────────────────────────────────────────────────────
+
+@app.post("/generate-audio")
+async def generate_audio_endpoint(req: AudioRequest):
+    """Generates an AI audio brief using Piper TTS."""
+    from ai.llama_inference import _call_with_fallback
+    
+    # Clean the article ID for the response URL
+    safe_article_id = "".join([c if c.isalnum() else "_" for c in req.article_id])
+    
+    script = req.text.strip() if req.text else ""
+    if not script:
+        # Generate script using AI (no text provided)
+        prompt = f"""Convert this news into a short audio briefing:
+
+{req.article_id}
+
+* Hook (1 line)
+* 3–4 key insights
+* Final takeaway
+
+Keep it clear, concise, and under 60 seconds. Return ONLY the plain text script without markdown formatting."""
+        try:
+            script = _call_with_fallback(prompt)
+            # Cleanup AI output removing markdown formatting
+            script = script.replace('*', '').replace('#', '').strip()
+        except Exception as e:
+            # Check if it was manually triggered or from UI, return graceful response
+            print(f"Failed to generate audio script: {str(e)}")
+            return JSONResponse(status_code=500, content={"detail": f"Failed to generate AI script: {str(e)}"})
+            
+    # Enforce rough length limit to ensure it completes under 60 seconds
+    if len(script) > 1500:
+        script = script[:1497] + "..."
+
+    # Call Audio Service
+    try:
+        generate_audio_service(script, req.article_id)
+        return {
+            "audio_url": f"/audio/{safe_article_id}.wav",
+            "status": "ready"
+        }
+    except Exception as e:
+        # Do not crash the server, just return the error gracefully
+        print(f"Failed to generate TTS audio: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": f"TTS Failure: {str(e)}"})

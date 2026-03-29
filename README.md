@@ -8,6 +8,7 @@ An AI-native personalized business news intelligence platform MVP.
 - **Local AI Engine**: Ollama (LLaMA3 Model), Langchain
 - **Vector DB / RAG**: FAISS + sentence-transformers/all-MiniLM-L6-v2
 - **Data Source**: GNews REST API (Free tier) with local fallback.
+- **Audio/Video AI**: Piper TTS (Local Audio Briefings) & D-ID API (Video Anchors)
 
 ---
 

@@ -62,6 +62,12 @@ IntelliSphere dynamically cascades through Google Gemini models (Pro/Flash/Lite)
 ### 10. In-App System Configuration
 Via a robust frontend Settings UI, users can securely configure the underlying global LLM keys without ever touching a code editor. Backend updates process synchronously with local `.env` rewriting and immediate zero-downtime hot reloading.
 
+### 11. AI Video Anchoring 🎥
+Generates an AI avatar video summarizing the news article. This allows users to watch and listen to a synthesized news anchor delivering a concise briefing of the selected story.
+
+### 12. Local AI Audio Briefing 🎧
+Provides a "Listen to Intelligence" feature utilizing locally hosted Piper TTS. Automatically converts an article's intelligence brief into an under-60-second audio stream that plays natively in the dashboard, ensuring privacy, infinite reusability, and offline capability.
+
 ---
 
 ## ⚙️ How to Run Locally
